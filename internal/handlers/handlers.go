@@ -15,8 +15,8 @@ var views = jet.NewSet(
 	jet.InDevelopmentMode(),
 )
 
-// upgradeConnestion function - Upgrades regular web connection to a websocket connection
-var upgradeConnestion = websocket.Upgrader{
+// upgradeConnection function - Upgrades regular web connection to a websocket connection
+var upgradeConnection = websocket.Upgrader{
 
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -46,7 +46,7 @@ type WsJsonResponse struct {
 // WebSocketEndPoint handler that upgrades connection to web socket
 func WebSocketEndPoint(w http.ResponseWriter, r *http.Request) {
 
-	ws, err := upgradeConnestion.Upgrade(w, r, nil)
+	ws, err := upgradeConnection.Upgrade(w, r, nil)
 
 	if err != nil {
 
