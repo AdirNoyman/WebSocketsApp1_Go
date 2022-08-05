@@ -1,11 +1,18 @@
 package handlers
 
 import (
+	"fmt"
 	"github.com/CloudyKit/jet/v6"
 	"github.com/gorilla/websocket"
 	"log"
 	"net/http"
 )
+
+// webSocketChannel - The channel will except only data type WsPayload
+var webSocketChannel = make(chan WsPayload)
+
+// clients - a map of websocket connected clients (every client has his own websocket connection)
+var clients = make(map[WebSocketConnection]string)
 
 var views = jet.NewSet(
 
@@ -24,7 +31,7 @@ var upgradeConnection = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-// Home renders the home page
+// Home renders and displays the home page
 func Home(w http.ResponseWriter, r *http.Request) {
 
 	err := renderPage(w, "home.jet", nil)
@@ -36,14 +43,29 @@ func Home(w http.ResponseWriter, r *http.Request) {
 
 }
 
-// WsJsonResponse defines the response sent back from websocket
+// WebSocketConnection data structure that holds the data about the websocket connection
+type WebSocketConnection struct {
+	*websocket.Conn
+}
+
+// WsJsonResponse defines the response data structure sent back from websocket
 type WsJsonResponse struct {
 	Action      string `json:"action"`
 	Message     string `json:"message"`
 	MessageType string `json:"message_type"`
 }
 
-// WebSocketEndPoint handler that upgrades connection to web socket
+// WsPayload is the data structure of the data we send to the websocket
+type WsPayload struct {
+	// Action like 'Joined' (the chat) for example
+	Action   string `json:"action"`
+	Username string `json:"username"`
+	Message  string `json:"message"`
+	// When you put "-" it means don't show it in the json file
+	Conn WebSocketConnection `json:"-"`
+}
+
+// WebSocketEndPoint handler that upgrades connection to web socket and sends a response back to the client
 func WebSocketEndPoint(w http.ResponseWriter, r *http.Request) {
 
 	ws, err := upgradeConnection.Upgrade(w, r, nil)
@@ -59,12 +81,80 @@ func WebSocketEndPoint(w http.ResponseWriter, r *http.Request) {
 	var response WsJsonResponse
 	response.Message = `<em><small>Connected to server successfully</small></em>`
 
+	// Add the user who connects to the websockets connections map
+	conn := WebSocketConnection{Conn: ws}
+	clients[conn] = ""
 	// Marshall the response to JSON and send it back to the client
 	err = ws.WriteJSON(response)
 	if err != nil {
 
 		log.Println("Error connecting to websocket", err)
 
+	}
+
+	// Listen for WsPayload, and if WsPayload is sent to the channel we are listening for, we send it to the webSocketChannel
+	go ListenForWS(&conn)
+
+}
+
+// ListenForWS is a Go routine. This function will run on a concurrently on separate thread
+func ListenForWS(conn *WebSocketConnection) {
+	// defer function is recovery function, that is called if the parent function('ListenForWS') dies for whatever reason
+	defer func() {
+
+		if err := recover(); err != nil {
+
+			log.Println("Error", fmt.Sprintf("%v", err))
+		}
+
+	}()
+
+	var payload WsPayload
+
+	// Run forever and keep reading the payload that is sent by the user requests to the websocket connection
+	for {
+
+		err := conn.ReadJSON(payload)
+		if err != nil {
+			// do nothing
+		} else {
+
+			payload.Conn = *conn
+			// Send the payload to my webSocketChannel
+			webSocketChannel <- payload
+		}
+	}
+}
+
+func ListenToWebSocketChannel() {
+
+	var response WsJsonResponse
+
+	for {
+
+		event := <-webSocketChannel
+		response.Action = "Got here 😎🤟"
+		response.Message = fmt.Sprintf("Some message 🙄... and action was %s", event.Action)
+		// Broadcast a response to all the connected users. simultaneously
+		broadcastMsgToAllConnectedClients(response)
+	}
+}
+
+func broadcastMsgToAllConnectedClients(response WsJsonResponse) {
+
+	for client := range clients {
+
+		err := client.WriteJSON(response)
+		// Error example -> user already left the connection
+		if err != nil {
+
+			log.Println("Websocket error")
+			// Close there connection
+			_ = client.Close()
+			// Delete that user's connection from the map
+			delete(clients, client)
+
+		}
 	}
 
 }
