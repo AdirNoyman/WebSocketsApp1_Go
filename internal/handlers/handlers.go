@@ -6,6 +6,7 @@ import (
 	"github.com/gorilla/websocket"
 	"log"
 	"net/http"
+	"sort"
 )
 
 // webSocketChannel - The channel will except only data type WsPayload
@@ -48,11 +49,12 @@ type WebSocketConnection struct {
 	*websocket.Conn
 }
 
-// WsJsonResponse defines the response data structure sent back from websocket
+// WsJsonResponse defines the response data structure sent back from websocket to the connected clients
 type WsJsonResponse struct {
-	Action      string `json:"action"`
-	Message     string `json:"message"`
-	MessageType string `json:"message_type"`
+	Action         string   `json:"action"`
+	Message        string   `json:"message"`
+	MessageType    string   `json:"message_type"`
+	ConnectedUsers []string `json:"connected_users"`
 }
 
 // WsPayload is the data structure of the data we send to the websocket
@@ -114,7 +116,7 @@ func ListenForWS(conn *WebSocketConnection) {
 	// Run forever and keep reading the payload that is sent by the user requests to the websocket connection
 	for {
 
-		err := conn.ReadJSON(payload)
+		err := conn.ReadJSON(&payload)
 		if err != nil {
 			// do nothing
 		} else {
@@ -133,11 +135,49 @@ func ListenToWebSocketChannel() {
 	for {
 
 		event := <-webSocketChannel
-		response.Action = "Got here 😎🤟"
-		response.Message = fmt.Sprintf("Some message 🙄... and action was %s", event.Action)
-		// Broadcast a response to all the connected users. simultaneously
-		broadcastMsgToAllConnectedClients(response)
+		switch event.Action {
+
+		case "username":
+			// Get a list of all users and send it back via broadcast to all connected clients
+			clients[event.Conn] = event.Username
+			users := getUserList()
+			response.Action = "list_users"
+			response.ConnectedUsers = users
+			broadcastMsgToAllConnectedClients(response)
+		case "user_left":
+			response.Action = "list_users"
+			// Remove the user who has left from the list on connected clients
+			delete(clients, event.Conn)
+			// Refresh the connected users list that is sent back to client for display in the browser
+			users := getUserList()
+			response.ConnectedUsers = users
+			broadcastMsgToAllConnectedClients(response)
+		case "broadcast":
+			// Format a response back to the client
+			response.Action = "broadcast"
+			response.Message = fmt.Sprintf("<strong>%s</strong>: %s", event.Username, event.Message)
+			broadcastMsgToAllConnectedClients(response)
+		}
+		//response.Action = "Got here 😎🤟"
+		//response.Message = fmt.Sprintf("Some message 🙄... and action was %s", event.Action)
+		//// Broadcast a response to all the connected users. simultaneously
+		//broadcastMsgToAllConnectedClients(response)
 	}
+}
+
+func getUserList() []string {
+	var userList []string
+	for _, x := range clients {
+		if x != "" {
+
+			userList = append(userList, x)
+		}
+
+	}
+
+	sort.Strings(userList)
+	return userList
+
 }
 
 func broadcastMsgToAllConnectedClients(response WsJsonResponse) {
